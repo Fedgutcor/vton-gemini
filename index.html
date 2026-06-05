@@ -1,0 +1,575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VTON — Virtual Try-On with Gemini</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #0d0d12;
+      --bg2:       #111118;
+      --bg3:       #16161f;
+      --border:    #22222e;
+      --border-hi: #3a3a55;
+      --text:      #e0e0e0;
+      --text-dim:  #666;
+      --accent:    #5c54e8;
+      --accent-hi: #7870f0;
+      --green:     #4ade80;
+      --red:       #f87171;
+      --yellow:    #fbbf24;
+    }
+
+    body {
+      font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      padding: 2.5rem 1rem 5rem;
+    }
+
+    /* ── Header ── */
+    .header { text-align: center; margin-bottom: 2.5rem; }
+    .header h1 { font-size: 1.8rem; font-weight: 700; letter-spacing: -1px; }
+    .header p  { font-size: 0.83rem; color: var(--text-dim); margin-top: 0.3rem; }
+
+    /* ── API Key setup ── */
+    #setup {
+      width: 100%; max-width: 680px;
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.25rem 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    #setup summary {
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      font-size: 0.88rem;
+      font-weight: 500;
+      color: var(--text-dim);
+      user-select: none;
+      list-style: none;
+    }
+
+    #setup summary::marker, #setup summary::-webkit-details-marker { display: none; }
+    #setup[open] summary { color: var(--text); margin-bottom: 1rem; }
+
+    .key-badge {
+      font-size: 0.72rem;
+      padding: 2px 8px;
+      border-radius: 99px;
+      font-weight: 600;
+    }
+
+    .key-badge.set   { background: #0d2b1a; color: var(--green);  border: 1px solid #1a5c35; }
+    .key-badge.unset { background: #2b1a0d; color: var(--yellow); border: 1px solid #5c3d1a; }
+
+    .key-row {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    .key-row input {
+      flex: 1;
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 0.6rem 0.9rem;
+      font-size: 0.85rem;
+      font-family: monospace;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .key-row input:focus { border-color: var(--accent); }
+    .key-row input::placeholder { color: #333; }
+
+    .btn-sm {
+      padding: 0.55rem 1rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-weight: 500;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+
+    .btn-sm:hover { background: var(--accent-hi); }
+
+    .btn-ghost {
+      padding: 0.55rem 0.9rem;
+      background: transparent;
+      color: var(--text-dim);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    .btn-ghost:hover { border-color: var(--border-hi); color: var(--text); }
+
+    .key-note {
+      font-size: 0.75rem;
+      color: var(--text-dim);
+      margin-top: 0.6rem;
+      line-height: 1.5;
+    }
+
+    .key-note a { color: var(--accent); text-decoration: none; }
+    .key-note a:hover { text-decoration: underline; }
+
+    /* ── Upload zones ── */
+    .uploads {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1.25rem;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    @media (max-width: 500px) {
+      .uploads { grid-template-columns: 1fr; }
+    }
+
+    .zone {
+      border: 2px dashed var(--border);
+      border-radius: 14px;
+      padding: 1.5rem 1rem;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      min-height: 240px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .zone:hover       { border-color: #444; background: #101018; }
+    .zone.has-image   { border-style: solid; border-color: var(--border-hi); padding: 0.5rem; }
+    .zone input[type=file] { display: none; }
+
+    .zone img {
+      width: 100%; height: 100%;
+      object-fit: contain;
+      border-radius: 10px;
+    }
+
+    .zone-icon  { font-size: 2rem; }
+    .zone-title { font-size: 0.95rem; color: #bbb; font-weight: 500; }
+    .zone-hint  { font-size: 0.78rem; color: #444; line-height: 1.4; }
+
+    .clear-btn {
+      position: absolute; top: 7px; right: 8px;
+      background: #1e1e2e;
+      border: 1px solid var(--border);
+      color: var(--text-dim);
+      border-radius: 50%;
+      width: 24px; height: 24px;
+      cursor: pointer;
+      font-size: 0.7rem;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      transition: background 0.15s;
+    }
+
+    .zone.has-image .clear-btn { display: flex; }
+    .clear-btn:hover { background: #2a2a3a; }
+
+    /* ── Actions ── */
+    .actions {
+      margin-top: 2rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.8rem;
+    }
+
+    #tryBtn {
+      padding: 0.9rem 3.5rem;
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      letter-spacing: 0.3px;
+      transition: background 0.2s, opacity 0.2s, transform 0.1s;
+    }
+
+    #tryBtn:hover:not(:disabled) { background: var(--accent-hi); transform: translateY(-1px); }
+    #tryBtn:active:not(:disabled) { transform: translateY(0); }
+    #tryBtn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+    #status {
+      font-size: 0.84rem;
+      color: var(--text-dim);
+      min-height: 1.2rem;
+      text-align: center;
+      max-width: 500px;
+    }
+
+    #status.error  { color: var(--red); }
+    #status.ok     { color: var(--green); }
+    #status.info   { color: #aaa; }
+
+    /* ── Progress ── */
+    .progress-wrap {
+      width: 100%; max-width: 400px;
+      height: 3px; background: var(--bg3);
+      border-radius: 2px; overflow: hidden;
+      display: none;
+    }
+
+    .progress-bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--accent-hi));
+      border-radius: 2px;
+      animation: progress 18s linear forwards;
+    }
+
+    @keyframes progress { from { width: 0% } to { width: 92% } }
+
+    /* ── Result ── */
+    #result {
+      margin-top: 2.5rem;
+      width: 100%;
+      max-width: 520px;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    #resultImg {
+      max-width: 100%;
+      border-radius: 14px;
+      box-shadow: 0 8px 60px rgba(0,0,0,0.5);
+      display: none;
+    }
+
+    #downloadBtn {
+      display: none;
+      padding: 0.6rem 1.6rem;
+      background: transparent;
+      border: 1px solid var(--border-hi);
+      color: #aaa;
+      border-radius: 8px;
+      font-size: 0.84rem;
+      cursor: pointer;
+      transition: border-color 0.2s, color 0.2s;
+    }
+
+    #downloadBtn:hover { border-color: var(--accent); color: #c8c4ff; }
+
+    /* ── Spinner ── */
+    .spinner {
+      display: inline-block;
+      width: 14px; height: 14px;
+      border: 2px solid #ffffff22;
+      border-top-color: #aaa;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>Virtual Try-On</h1>
+    <p>Powered by Gemini · Free with Google AI Studio</p>
+  </div>
+
+  <!-- API Key setup -->
+  <details id="setup">
+    <summary>
+      <span>⚙ API Key</span>
+      <span class="key-badge unset" id="keyBadge">not set</span>
+    </summary>
+
+    <div class="key-row">
+      <input
+        type="password"
+        id="keyInput"
+        placeholder="Paste your Google AI Studio key here"
+        autocomplete="off"
+        spellcheck="false"
+      >
+      <button class="btn-sm" onclick="saveKey()">Save</button>
+      <button class="btn-ghost" onclick="clearKey()">Clear</button>
+    </div>
+
+    <p class="key-note">
+      Your key is saved only in your browser (localStorage). It is never sent to any server other than Google.
+      <br>Get a free key at <a href="https://aistudio.google.com/apikey" target="_blank">aistudio.google.com/apikey</a> →
+      click <strong>Create API key</strong>.
+    </p>
+  </details>
+
+  <!-- Upload zones -->
+  <div class="uploads">
+    <div class="zone" id="zA" onclick="zoneClick('iA')">
+      <button class="clear-btn" onclick="clearZone(event,'zA','iA','pA','person')">✕</button>
+      <input type="file" id="iA" accept="image/*" onchange="loadFile(this,'pA','zA','person')">
+      <div id="phA">
+        <div class="zone-icon">📷</div>
+        <div class="zone-title">Your photo</div>
+        <div class="zone-hint">Full or half body<br>Good lighting works best</div>
+      </div>
+      <img id="pA" style="display:none" alt="person preview">
+    </div>
+
+    <div class="zone" id="zB" onclick="zoneClick('iB')">
+      <button class="clear-btn" onclick="clearZone(event,'zB','iB','pB','cloth')">✕</button>
+      <input type="file" id="iB" accept="image/*" onchange="loadFile(this,'pB','zB','cloth')">
+      <div id="phB">
+        <div class="zone-icon">👕</div>
+        <div class="zone-title">Garment</div>
+        <div class="zone-hint">Photo of the clothing item<br>White/neutral background is ideal</div>
+      </div>
+      <img id="pB" style="display:none" alt="garment preview">
+    </div>
+  </div>
+
+  <div class="actions">
+    <button id="tryBtn" disabled onclick="tryOn()">Try it on →</button>
+    <div id="status"></div>
+    <div class="progress-wrap" id="progressWrap">
+      <div class="progress-bar" id="progressBar"></div>
+    </div>
+  </div>
+
+  <div id="result">
+    <img id="resultImg" alt="try-on result">
+    <button id="downloadBtn" onclick="downloadResult()">⬇ Download result</button>
+  </div>
+
+  <script>
+    const MODEL    = "gemini-3.1-flash-image";
+    const API_BASE = "https://generativelanguage.googleapis.com/v1beta/models";
+    const LS_KEY   = "vton_gemini_api_key";
+
+    const files = { person: null, cloth: null };
+
+    // ── Key management ──────────────────────────────────────────────────────
+    function loadKey() {
+      const k = localStorage.getItem(LS_KEY) || "";
+      if (k) {
+        document.getElementById("keyInput").value = k;
+        setKeyBadge(true);
+      }
+      checkReady();
+    }
+
+    function saveKey() {
+      const k = document.getElementById("keyInput").value.trim();
+      if (!k) return;
+      localStorage.setItem(LS_KEY, k);
+      setKeyBadge(true);
+      document.getElementById("setup").removeAttribute("open");
+      checkReady();
+    }
+
+    function clearKey() {
+      localStorage.removeItem(LS_KEY);
+      document.getElementById("keyInput").value = "";
+      setKeyBadge(false);
+      checkReady();
+    }
+
+    function setKeyBadge(isSet) {
+      const b = document.getElementById("keyBadge");
+      b.textContent  = isSet ? "✓ set" : "not set";
+      b.className    = "key-badge " + (isSet ? "set" : "unset");
+    }
+
+    function getKey() {
+      return localStorage.getItem(LS_KEY) || "";
+    }
+
+    // Allow Enter key to save
+    document.getElementById("keyInput").addEventListener("keydown", e => {
+      if (e.key === "Enter") saveKey();
+    });
+
+    // ── File handling ───────────────────────────────────────────────────────
+    function zoneClick(id) { document.getElementById(id).click(); }
+
+    function loadFile(input, previewId, zoneId, key) {
+      const file = input.files[0];
+      if (!file) return;
+      files[key] = file;
+
+      const reader = new FileReader();
+      reader.onload = e => {
+        const img = document.getElementById(previewId);
+        img.src = e.target.result;
+        img.style.display = "block";
+        document.getElementById(zoneId).classList.add("has-image");
+        document.getElementById(zoneId === "zA" ? "phA" : "phB").style.display = "none";
+        checkReady();
+      };
+      reader.readAsDataURL(file);
+    }
+
+    function clearZone(e, zoneId, inputId, previewId, key) {
+      e.stopPropagation();
+      files[key] = null;
+      const img = document.getElementById(previewId);
+      img.style.display = "none"; img.src = "";
+      document.getElementById(inputId).value = "";
+      document.getElementById(zoneId).classList.remove("has-image");
+      document.getElementById(zoneId === "zA" ? "phA" : "phB").style.display = "";
+      checkReady();
+    }
+
+    function toBase64(file) {
+      return new Promise((res, rej) => {
+        const r = new FileReader();
+        r.onload  = e => res(e.target.result.split(",")[1]);
+        r.onerror = rej;
+        r.readAsDataURL(file);
+      });
+    }
+
+    function checkReady() {
+      document.getElementById("tryBtn").disabled =
+        !(files.person && files.cloth && getKey());
+    }
+
+    // ── Status helpers ──────────────────────────────────────────────────────
+    function setStatus(msg, cls = "") {
+      const el = document.getElementById("status");
+      el.className = cls;
+      el.innerHTML = msg;
+    }
+
+    // ── Try-on ──────────────────────────────────────────────────────────────
+    async function tryOn() {
+      const btn = document.getElementById("tryBtn");
+      btn.disabled = true;
+
+      document.getElementById("resultImg").style.display = "none";
+      document.getElementById("downloadBtn").style.display = "none";
+
+      const wrap = document.getElementById("progressWrap");
+      const bar  = document.getElementById("progressBar");
+      bar.style.animation = "none";
+      void bar.offsetWidth;
+      bar.style.animation = "progress 18s linear forwards";
+      wrap.style.display = "block";
+
+      setStatus('<span class="spinner"></span>Generating…', "info");
+
+      try {
+        const [personB64, clothB64] = await Promise.all([
+          toBase64(files.person),
+          toBase64(files.cloth)
+        ]);
+
+        const res = await fetch(
+          `${API_BASE}/${MODEL}:generateContent?key=${getKey()}`,
+          {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              contents: [{
+                parts: [
+                  {
+                    text: [
+                      "Virtual try-on task.",
+                      "Image 1 is the person. Image 2 is the garment.",
+                      "Output: the SAME person wearing the garment from Image 2.",
+                      "Keep the person's face, skin tone, hair, glasses, body shape,",
+                      "pose, and background IDENTICAL.",
+                      "Replace ONLY the clothing. Match lighting, shadows, and wrinkles naturally.",
+                      "Photorealistic output. No watermarks, no added text."
+                    ].join(" ")
+                  },
+                  { inline_data: { mime_type: files.person.type || "image/jpeg", data: personB64 } },
+                  { inline_data: { mime_type: files.cloth.type  || "image/jpeg", data: clothB64  } }
+                ]
+              }],
+              generationConfig: { responseModalities: ["IMAGE", "TEXT"] }
+            })
+          }
+        );
+
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error?.message || `HTTP ${res.status}`);
+
+        wrap.style.display = "none";
+
+        const parts   = data.candidates?.[0]?.content?.parts ?? [];
+        const imgPart = parts.find(p => p.inlineData);
+        const txtPart = parts.find(p => p.text);
+
+        if (imgPart) {
+          const img = document.getElementById("resultImg");
+          img.src = `data:${imgPart.inlineData.mimeType};base64,${imgPart.inlineData.data}`;
+          img.style.display = "block";
+          document.getElementById("downloadBtn").style.display = "inline-block";
+          setStatus("✓ Done", "ok");
+        } else if (txtPart) {
+          setStatus(txtPart.text, "error");
+        } else {
+          throw new Error("No image returned. Check your API key and try again.");
+        }
+
+      } catch (err) {
+        wrap.style.display = "none";
+        if (err.name === "TypeError") {
+          setStatus(
+            "Network error. If you see a CORS issue, serve this file with: " +
+            "<code>python3 -m http.server 8080</code> then open localhost:8080",
+            "error"
+          );
+        } else if (err.message.includes("API_KEY_INVALID") || err.message.includes("403")) {
+          setStatus("Invalid API key. Please check your key in the ⚙ settings above.", "error");
+        } else {
+          setStatus(`Error: ${err.message}`, "error");
+        }
+      } finally {
+        btn.disabled = false;
+        checkReady();
+      }
+    }
+
+    // ── Download ────────────────────────────────────────────────────────────
+    function downloadResult() {
+      const img = document.getElementById("resultImg");
+      const a   = document.createElement("a");
+      a.href     = img.src;
+      a.download = `tryon_${Date.now()}.jpg`;
+      a.click();
+    }
+
+    // ── Init ────────────────────────────────────────────────────────────────
+    loadKey();
+  </script>
+</body>
+</html>
