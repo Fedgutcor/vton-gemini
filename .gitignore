@@ -15,3 +15,14 @@ secrets.*
 
 # Test output
 *.test.html
+
+# Security & Credentials
+*.env
+*.pem
+*.key
+*.p12
+!.env.example
+
+# Metadata interna del Command Center (site tracker): no va a un repo publico.
+# Lleva la ruta local absoluta del nodo y describe el inventario interno.
+.sitetrack.yaml
